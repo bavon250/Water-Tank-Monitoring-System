@@ -1,25 +1,18 @@
 # Water Tank Monitoring using Linear Regression
 
 ## Project overview
-This beginner-friendly machine learning project predicts remaining water in a tank (liters) using:
-- Time (converted to elapsed minutes)
+This is machine learning project predicts remaining water in a tank (liters) using:
+- Time 
 - Water level (%)
 - Water usage rate (liters/minute)
 
 The model is implemented in a Google Colab notebook using Python, pandas, matplotlib, and scikit-learn.
 
 ## Files
-- `Water_Tank_Linear_Regression.ipynb` — notebook to run in Google Colab
-- `water_tank_dataset_time_level_usage.csv` — sample dataset
+- `Water Tank Linear Regression.ipynb` — notebook to run in Google Colab
+- `water tank dataset time level usage.csv` — sample dataset
 - `requirements.txt` — Python dependencies
-
-## How to run in Google Colab
-1. Download or clone this repository.
-2. Open [Google Colab](https://colab.research.google.com/).
-3. Choose **File → Upload notebook** and upload `Water_Tank_Linear_Regression.ipynb`.
-4. Run the notebook cells in order.
-5. When prompted, upload `water_tank_dataset_time_level_usage.csv`.
-6. Review the MAE, RMSE, R² score, and actual-vs-predicted graph.
+- `app.py` - application fot streamlit which will help to predict
 
 ## Dataset columns
 | Column | Meaning |
