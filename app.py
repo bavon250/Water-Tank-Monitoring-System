@@ -12,7 +12,7 @@ st.write(
     "at different usage rates. The trained Linear Regression model provides the ML prediction."
 )
 
-MODEL_PATH = Path("water_tank_model.pkl")
+MODEL_PATH = Path(__file__).resolve().parent / "water_tank_model.pkl"
 
 @st.cache_resource
 def load_model(path_string):
