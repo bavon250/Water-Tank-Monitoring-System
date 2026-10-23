@@ -1,269 +1,128 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import joblib
 from pathlib import Path
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import matplotlib.pyplot as plt
 
-st.set_page_config(
-    page_title="Water Tank Monitoring",
-    page_icon="💧",
-    layout="wide"
+st.set_page_config(page_title="Water Tank Prediction", page_icon="💧", layout="centered")
+st.title("💧 Water Tank Remaining-Water Predictor")
+st.write(
+    "Change the water usage rate and immediately compare how much water may remain "
+    "at different usage rates. The trained Linear Regression model provides the ML prediction."
 )
 
-st.title("💧 Water Tank Monitoring System")
-st.subheader("Predict Remaining Water Using Linear Regression")
+MODEL_PATH = Path("water_tank_model.pkl")
 
+@st.cache_resource
+def load_model(path_string):
+    return joblib.load(path_string)
 
-# Load the existing project dataset automatically
-DATA_FILE = (
-    Path(__file__).parent
-    / "water_tank_dataset_time_level_usage.csv"
-)
-
-@st.cache_data
-def load_dataset(path):
-    df = pd.read_csv(path)
-    df["time"] = pd.to_datetime(df["time"], errors="coerce")
-
-    numeric_columns = [
-        "water_level_percent",
-        "usage_rate_liters_per_min",
-        "remaining_water_liters"
-    ]
-
-    for col in numeric_columns:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    required = ["time"] + numeric_columns
-    df = df.dropna(subset=required)
-    df = df.sort_values("time").reset_index(drop=True)
-
-    if len(df) < 5:
-        raise ValueError("The dataset must contain at least 5 valid rows.")
-
-    return df
-
-try:
-    if not DATA_FILE.exists():
-        st.error(
-            "Dataset not found. Make sure "
-            "'water_tank_dataset_time_level_usage.csv' "
-            "is in the same GitHub folder as app.py."
-        )
-        st.stop()
-
-    df = load_dataset(str(DATA_FILE))
-
-except Exception as error:
-    st.error(f"Could not load dataset: {error}")
+if not MODEL_PATH.exists():
+    st.error(
+        "Model file not found: water_tank_model.pkl. Save the trained model from your Colab "
+        "notebook in the same folder as app.py."
+    )
+    st.code('import joblib\njoblib.dump(model, "water_tank_model.pkl")', language="python")
     st.stop()
 
-# Prepare data for machine learning
-df["elapsed_minutes"] = (
-    df["time"] - df["time"].min()
-).dt.total_seconds() / 60
+try:
+    model = load_model(str(MODEL_PATH))
+except Exception as exc:
+    st.error(f"Could not load the trained model: {exc}")
+    st.stop()
 
-features = [
-    "elapsed_minutes",
-    "water_level_percent",
-    "usage_rate_liters_per_min"
-]
-
-target = "remaining_water_liters"
-
-X = df[features]
-y = df[target]
-
-# Train on earlier readings and test on later readings
-split = int(len(df) * 0.8)
-X_train = X.iloc[:split]
-X_test = X.iloc[split:]
-y_train = y.iloc[:split]
-y_test = y.iloc[split:]
-
-# Train model automatically
-model = LinearRegression()
-model.fit(X_train, y_train)
-
-predictions = model.predict(X_test)
-
-# Dashboard
-st.success("Model trained successfully using the included dataset.")
-
-st.header("1. Tank overview")
-
-a, b, c = st.columns(3)
-a.metric(
-    "Latest water level",
-    f"{df['water_level_percent'].iloc[-1]:.1f}%"
-)
-b.metric(
-    "Latest remaining water",
-    f"{df['remaining_water_liters'].iloc[-1]:.1f} L"
-)
-c.metric(
-    "Latest usage rate",
-    f"{df['usage_rate_liters_per_min'].iloc[-1]:.2f} L/min"
-)
-
-with st.expander("View the training dataset"):
-    st.dataframe(
-        df[[
-            "time",
-            "water_level_percent",
-            "usage_rate_liters_per_min",
-            "remaining_water_liters"
-        ]],
-        use_container_width=True
+st.subheader("Tank information")
+col1, col2 = st.columns(2)
+with col1:
+    tank_capacity = st.number_input("Tank capacity (litres)", min_value=1.0, value=1000.0, step=100.0)
+    current_water = st.number_input("Current water level (litres)", min_value=0.0, value=800.0, step=10.0)
+with col2:
+    hours_ahead = st.slider("Predict after how many hours?", min_value=1, max_value=24, value=5)
+    usage_rate = st.slider(
+        "Change water usage rate (litres/hour)",
+        min_value=0, max_value=200, value=40, step=5,
+        help="Move this slider to see how increasing or decreasing usage changes the prediction."
     )
 
-# Model evaluation
-st.header("2. Model performance")
+if current_water > tank_capacity:
+    st.error("Current water level cannot exceed tank capacity.")
+    st.stop()
 
-mae = mean_absolute_error(y_test, predictions)
-rmse = np.sqrt(mean_squared_error(y_test, predictions))
-r2 = r2_score(y_test, predictions) if len(y_test) > 1 else np.nan
+def predict_ml(rate):
+    features = pd.DataFrame([{
+        "Time_Ahead_Hours": float(hours_ahead),
+        "Water_Level_L": float(current_water),
+        "Usage_Rate_L_per_hour": float(rate)
+    }])
+    value = float(np.asarray(model.predict(features)).reshape(-1)[0])
+    # Keep display within plausible bounds, assuming no refill.
+    return float(np.clip(value, 0, min(tank_capacity, current_water)))
 
+# Compare machine-learning prediction with a transparent constant-usage calculation.
+ml_prediction = predict_ml(usage_rate)
+balance_prediction = max(0.0, current_water - usage_rate * hours_ahead)
+
+st.subheader("Prediction at the selected usage rate")
 m1, m2, m3 = st.columns(3)
-m1.metric("MAE", f"{mae:.2f} liters")
-m2.metric("RMSE", f"{rmse:.2f} liters")
-m3.metric(
-    "R² score",
-    f"{r2:.4f}" if np.isfinite(r2) else "N/A"
+m1.metric("ML predicted water", f"{ml_prediction:,.1f} L")
+m2.metric("Simple estimate", f"{balance_prediction:,.1f} L")
+m3.metric("Water used by simple estimate", f"{min(current_water, usage_rate * hours_ahead):,.1f} L")
+
+st.progress(
+    min(max(ml_prediction / tank_capacity, 0.0), 1.0),
+    text=f"ML prediction: {ml_prediction / tank_capacity * 100:.1f}% of tank capacity"
+)
+
+if balance_prediction <= 0 and usage_rate > 0:
+    st.warning("At this usage rate, the simple estimate says the tank may run empty within the selected time.")
+elif balance_prediction < 0.2 * tank_capacity:
+    st.warning("The simple estimate shows a low water level. Consider refilling soon.")
+
+st.divider()
+st.subheader("What happens when usage rate changes?")
+st.write(
+    "The chart compares the model's prediction and the simple water-balance estimate at different "
+    "usage rates. The simple estimate assumes no refill and a constant usage rate."
+)
+
+rates = sorted(set([0, 20, 40, 60, 80, 100, 120, int(usage_rate)]))
+rates = [r for r in rates if r <= 200]
+comparison = pd.DataFrame({
+    "Usage rate (L/hour)": rates,
+    "ML prediction (L)": [predict_ml(r) for r in rates],
+    "Simple estimate (L)": [max(0.0, current_water - r * hours_ahead) for r in rates]
+})
+st.dataframe(comparison, use_container_width=True, hide_index=True)
+
+chart_data = comparison.set_index("Usage rate (L/hour)")
+st.line_chart(chart_data, y=["ML prediction (L)", "Simple estimate (L)"])
+
+# Compare current slider value with a baseline rate of 40 L/hour.
+baseline_rate = 40
+baseline_ml = predict_ml(baseline_rate)
+baseline_simple = max(0.0, current_water - baseline_rate * hours_ahead)
+delta_ml = ml_prediction - baseline_ml
+delta_simple = balance_prediction - baseline_simple
+
+st.subheader("Effect compared with 40 L/hour")
+st.write(f"Selected rate: **{usage_rate} L/hour**; baseline: **{baseline_rate} L/hour**.")
+st.write(f"ML prediction difference: **{delta_ml:+.1f} L** compared with the baseline.")
+st.write(f"Simple estimate difference: **{delta_simple:+.1f} L** compared with the baseline.")
+if usage_rate > baseline_rate:
+    st.info("Usage is higher than the baseline. The simple estimate predicts less water remaining. Check the ML line too: the model may not show the expected relationship if training data is limited or simulated.")
+elif usage_rate < baseline_rate:
+    st.info("Usage is lower than the baseline. The simple estimate predicts more water remaining.")
+else:
+    st.info("The selected rate equals the baseline rate.")
+
+st.divider()
+st.subheader("How usage rate is calculated from readings")
+st.latex(r"\text{Usage rate} = \frac{\text{Previous level} - \text{Current level}}{\text{Elapsed hours}}")
+st.write(
+    "Example: a drop from 800 L to 760 L in one hour gives a net rate of 40 L/hour, "
+    "provided no water was added during that interval."
 )
 
 st.caption(
-    "MAE and RMSE measure prediction error in liters. "
-    "Lower values generally indicate smaller errors."
-)
-
-# Actual versus predicted graph
-st.subheader("Actual vs predicted water")
-
-fig, ax = plt.subplots(figsize=(10, 4))
-ax.plot(
-    df["time"].iloc[split:],
-    y_test.to_numpy(),
-    label="Actual water"
-)
-ax.plot(
-    df["time"].iloc[split:],
-    predictions,
-    label="Predicted water"
-)
-ax.set_xlabel("Time")
-ax.set_ylabel("Remaining water (liters)")
-ax.legend()
-fig.autofmt_xdate()
-fig.tight_layout()
-st.pyplot(fig)
-plt.close(fig)
-
-# User prediction form
-st.header("3. Predict remaining water")
-st.write("Enter the current tank readings below.")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    water_level = st.number_input(
-        "Current water level (%)",
-        min_value=0.0,
-        max_value=100.0,
-        value=50.0,
-        step=1.0
-    )
-
-    usage_rate = st.number_input(
-        "Current usage rate (liters/minute)",
-        min_value=0.0,
-        value=2.0,
-        step=0.1
-    )
-
-    elapsed_minutes = st.number_input(
-        "Minutes since the first dataset reading",
-        min_value=0.0,
-        value=float(df["elapsed_minutes"].iloc[-1]),
-        step=5.0
-    )
-
-    tank_capacity = st.number_input(
-        "Tank capacity (liters)",
-        min_value=1.0,
-        value=1000.0,
-        step=100.0
-    )
-
-    predict_button = st.button(
-        "Predict Remaining Water",
-        type="primary",
-        use_container_width=True
-    )
-
-with col2:
-    st.info(
-        "Enter the water level and usage rate from your tank. "
-        "The time value should use the same reference as the training data."
-    )
-
-if predict_button:
-    new_reading = pd.DataFrame([{
-        "elapsed_minutes": elapsed_minutes,
-        "water_level_percent": water_level,
-        "usage_rate_liters_per_min": usage_rate
-    }])
-
-    raw_prediction = float(model.predict(new_reading[features])[0])
-
-    # Limit the displayed estimate to the possible tank capacity
-    estimated_water = float(
-        np.clip(raw_prediction, 0, tank_capacity)
-    )
-
-    st.divider()
-    st.subheader("Prediction result")
-
-    r1, r2 = st.columns(2)
-    r1.metric(
-        "Estimated remaining water",
-        f"{estimated_water:,.2f} liters"
-    )
-    r2.metric(
-        "Estimated tank level",
-        f"{estimated_water / tank_capacity * 100:.1f}%"
-    )
-
-    if raw_prediction < 0 or raw_prediction > tank_capacity:
-        st.warning(
-            "The raw model prediction was outside the tank capacity "
-            "range. The displayed estimate has been limited to that range."
-        )
-
-    st.progress(
-        min(1.0, max(0.0, estimated_water / tank_capacity))
-    )
-
-# Water level history
-st.header("4. Water level history")
-
-fig2, ax2 = plt.subplots(figsize=(10, 4))
-ax2.plot(df["time"], df["water_level_percent"])
-ax2.set_xlabel("Time")
-ax2.set_ylabel("Water level (%)")
-ax2.set_ylim(0, 100)
-fig2.autofmt_xdate()
-fig2.tight_layout()
-st.pyplot(fig2)
-plt.close(fig2)
-
-st.warning(
-    "Important: this project uses synthetic sample data. "
-    "Its remaining-water values are calculated directly from water level, "
-    "so evaluation results may look unusually good. The app does not "
-    "connect to a real tank sensor. Validate predictions with real "
-    "measurements before relying on them."
-)
+    "Important: the ML result comes from your saved model. The simple estimate is a separate reference "
