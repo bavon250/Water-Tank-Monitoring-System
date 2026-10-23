@@ -125,4 +125,9 @@ st.write(
 )
 
 st.caption(
-    "Important: the ML result comes from your saved model. The simple estimate is a separate reference "
+    "Important: The ML result comes from your saved model. "
+    "The simple estimate is a separate reference calculation. "
+    "The notebook used simulated training data, so validate "
+    "predictions with real measurements. This app does not "
+    "automatically read a physical sensor."
+)
